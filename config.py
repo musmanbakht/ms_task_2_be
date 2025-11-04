@@ -1,4 +1,6 @@
 import os
+from dotenv import load_dotenv
+load_dotenv()
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
@@ -12,3 +14,6 @@ ALLOWED_LAYERS = [
     "zaf_water_lines_dcw",
     "zaf_osm_buildings"
 ]
+SECRET_KEY =  "THISISSECRETKEY"
+CLIENT_ID = os.getenv("client_id")
+CLIENT_SECRET = os.getenv("client_secret")

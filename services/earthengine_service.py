@@ -12,7 +12,7 @@ from sqlalchemy.sql import text
 from sqlalchemy.future import select
 import tempfile
 from services.ee_auth import get_ee_credentials
-
+import datetime
 # Path to your JSON key file
 SERVICE_ACCOUNT_KEY_FILE = "etmodule-eab6a2672e89.json"
 
@@ -65,14 +65,17 @@ async def get_et_map(product, province=None, geometry=None, input_date=None, pal
         # Handle geometry or province
         aoi = None
         if geometry:
-            print("GEOMMMM>>>>>>>>>>>>", geometry)
+            # print("GEOMMMM>>>>>>>>>>>>", geometry)
             aoi = convert_geojson_to_ee_geometry(geometry)
-            print("AOIII", aoi)
+            # print("AOIII", aoi)
         elif province:
-            pakistan = ee.FeatureCollection('FAO/GAUL/2015/level1').filter(
-                ee.Filter.eq('ADM0_NAME', 'Pakistan')
-            )
-            aoi = pakistan.filter(ee.Filter.eq('ADM1_NAME', province))
+            # pakistan = ee.FeatureCollection('FAO/GAUL/2015/level1').filter(
+            #     ee.Filter.eq('ADM0_NAME', 'Pakistan')
+            # )
+            south_africa = ee.FeatureCollection('FAO/GAUL/2015/level1').filter(
+    ee.Filter.eq('ADM0_NAME', 'South Africa')
+)
+            aoi = south_africa.filter(ee.Filter.eq('ADM1_NAME', province))
 
         # Ensure input_date is parsed
         target_date = ee.Date(input_date)
@@ -171,6 +174,137 @@ async def get_et_map(product, province=None, geometry=None, input_date=None, pal
         return {
             "status": 500,
             "message": str(e)
+        }
+    
+async def get_product_metadata(product_id: str, session_id: str):
+    """
+    Fetch metadata and availability details for an Earth Engine dataset.
+    """
+    print("Getting metadata for:", product_id)
+
+    if not session_id:
+        return {"status": 400, "message": "Session ID is required"}
+
+    try:
+        credentials = get_ee_credentials(session_id)
+        ee.Initialize(credentials=credentials)
+        print("✅ EE initialized for session:", session_id)
+    except Exception as e:
+        return {"status": 500, "message": f"Failed to initialize Earth Engine: {str(e)}"}
+
+    try:
+        # 1. Use ee.data.getInfo() to fetch the static asset JSON
+        # This is the key to getting the description
+        asset_info = ee.data.getInfo(product_id)
+        if not asset_info:
+            return {"status": 404, "message": "Product ID not found."}
+
+        asset_type = asset_info.get('type')
+        properties = asset_info.get('properties', {})
+
+        # 2. Extract static metadata (works for all asset types)
+        # This is the description you wanted:
+        description = properties.get('system:description') or properties.get('description') or "No description available."
+        
+        title = properties.get('title', product_id)
+        provider = properties.get('provider', 'Unknown')
+        
+        start_date, end_date = None, None
+        bands_metadata = []
+        crs, scale, bbox = None, None, None
+
+        # 3. Handle based on asset type (ImageCollection vs. Image)
+        if asset_type == "IMAGE_COLLECTION":
+            # --- Get dates (try fast static properties first) ---
+            start_timestamp = properties.get('system:time_start')
+            end_timestamp = properties.get('system:time_end')
+
+            # --- Get dynamic info (bands, crs) from the first image ---
+            dataset = ee.ImageCollection(product_id)
+            first_img = dataset.first()
+
+            # --- Fallback for dates (your original, slower method) ---
+            if not start_timestamp:
+                start_timestamp = dataset.aggregate_min('system:time_start').getInfo()
+            if not end_timestamp:
+                # Use time_start for robustness, as time_end isn't always present
+                end_timestamp = dataset.aggregate_max('system:time_start').getInfo() 
+            
+            # --- Get bands, crs, scale, bbox from the first image ---
+            try:
+                bands_info = first_img.bandNames().getInfo()
+                bands_metadata = [{"band": band} for band in bands_info]
+                
+                projection = first_img.projection().getInfo()
+                crs = projection.get("crs")
+                scale = projection.get("transform", [])[0] if "transform" in projection else None
+                
+                bbox = first_img.geometry().bounds().getInfo()['coordinates'][0]
+            except Exception as e:
+                print(f"Warning: Could not get dynamic info from collection's first image: {e}")
+
+        elif asset_type == "IMAGE":
+            # --- Get info directly from the IMAGE asset ---
+            image = ee.Image(product_id)
+            
+            # Get dates (images just have one time)
+            start_timestamp = properties.get('system:time_start')
+            end_timestamp = properties.get('system:time_end') or start_timestamp # End is same as start
+
+            # Get bands (from static info, more reliable for single image)
+            bands_info = asset_info.get('bands', [])
+            bands_metadata = [{"band": b.get('id', f'band_{i}')} for i, b in enumerate(bands_info)]
+
+            # Get projection and bbox from the image itself
+            try:
+                projection = image.projection().getInfo()
+                crs = projection.get("crs")
+                scale = projection.get("transform", [])[0] if "transform" in projection else None
+                
+                bbox = image.geometry().bounds().getInfo()['coordinates'][0]
+            except Exception as e:
+                print(f"Warning: Could not get dynamic info from image: {e}")
+
+        else:
+            print(f"Asset is of unhandled type: {asset_type}")
+            # Still return basic info
+            pass
+            
+        # 4. Format Dates
+        if start_timestamp:
+            start_date = datetime.datetime.utcfromtimestamp(start_timestamp / 1000).strftime('%Y-%m-%d')
+        if end_timestamp:
+            end_date = datetime.datetime.utcfromtimestamp(end_timestamp / 1000).strftime('%Y-%m-%d')
+        
+        # 5. Assemble the final response
+        return {
+            "status": 200,
+            "productId": product_id,
+            "assetType": asset_type,
+            "title": title,
+            "description": description,  # <-- Here is your description
+            "provider": provider,
+            "availableFrom": start_date,
+            "availableTo": end_date,
+            "bandList": bands_metadata,
+            "crs": crs,
+            "scale": scale,
+            "boundingBox": bbox
+        }
+
+    except ee.EEException as e:
+        # Handle common EE errors
+        if "ID does not refer to a" in str(e) or "Asset does not exist" in str(e):
+            return {"status": 404, "message": f"Product ID not found: {product_id}"}
+        return {
+            "status": 500,
+            "message": f"Earth Engine error: {str(e)}"
+        }
+    except Exception as e:
+        # Catch any other unexpected errors
+        return {
+            "status": 500,
+            "message": f"An unexpected error occurred: {str(e)}"
         }
 # async def get_start_and_end_date(product, db: AsyncSession = Depends(get_db)):
 #     user_id = 1

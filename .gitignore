@@ -1,2 +1,57 @@
+# ---- Python ----
+**/__pycache__/
+**/*.py[cod]
+**/*$py.class
+
+# ---- Virtual environment ----
+venv/
+.env/
+.venv/
+env/
+ENV/
+
+# ---- Environment variables ----
 .env
-venv
+*.env
+.env.*
+
+# ---- FastAPI / Uvicorn / logs ----
+*.log
+*.pid
+
+# ---- Distribution / packaging ----
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+.wheels/
+
+# ---- Testing ----
+.coverage
+htmlcov/
+.tox/
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.pytest_cache/
+
+# ---- IDE / Editor files ----
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# ---- OS / Misc ----
+.DS_Store
+Thumbs.db
+
+# ---- Type checker / linters ----
+.mypy_cache/
+.pyre/
+.pytype/
+ruff_cache/
+
+# ---- Jupyter / notebooks ----
+.ipynb_checkpoints/

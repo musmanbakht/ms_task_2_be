@@ -1,8 +1,27 @@
-from fastapi import APIRouter, Depends, HTTPException, Response
+# from fastapi import APIRouter, Depends, HTTPException, Response
+# from services.tiles_service import generate_mvt
+# from config import ALLOWED_LAYERS
+# from db.session import get_session
+# from services import earthengine_service
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Response,
+    Query,
+)
+
 from services.tiles_service import generate_mvt
+from services import earthengine_service
+from services import classification_service
+
+from api.schemas import (
+    ClassificationMapRequest,
+    ClassificationMapResponse,
+)
+
 from config import ALLOWED_LAYERS
 from db.session import get_session
-from services import earthengine_service
 
 router = APIRouter()
 
@@ -74,3 +93,26 @@ async def get_map(
 ):
     print("HERE")
     return await earthengine_service.get_product_metadata(product_id, session_id)
+@router.post(
+    "/earthengine/classification/map",
+    response_model=ClassificationMapResponse,
+)
+async def get_supervised_classification_map(
+    request: ClassificationMapRequest,
+
+    session_id: str = Query(
+        ...,
+        description=(
+            "Authenticated Earth Engine "
+            "session ID"
+        ),
+    ),
+):
+    return await (
+        classification_service
+        .get_classification_map(
+            session_id=session_id,
+            request_date=request.date,
+            mine_id=request.mine_id,
+        )
+    )

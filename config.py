@@ -8,6 +8,7 @@ DATABASE_URL = os.getenv(
 )
 
 ALLOWED_LAYERS = [
+    "mines_aoi",
     "zaf_adm0",
     "zaf_adm1",
     "zaf_water_areas_dcw",

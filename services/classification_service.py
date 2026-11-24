@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
+from pathlib import Path
 from datetime import date
 from typing import Optional, Any
 
@@ -8,6 +11,26 @@ import ee
 from fastapi import HTTPException
 
 from services.ee_auth import get_ee_credentials
+
+
+def _load_classification_stats(year: int, mine_id: Optional[str]) -> dict:
+    path = Path(__file__).resolve().parent.parent / "classification_stats" / f"Mine_Complete_Results_{year}.geojson"
+    try:
+        with path.open(encoding="utf-8") as file:
+            data = json.load(file)
+        records = []
+        for feature in data["features"]:
+            props = dict(feature["properties"])
+            if mine_id is not None and str(props.get("mine_id")) != str(mine_id):
+                continue
+            for key in ("class_areas_km2", "loaded_test_samples_by_class", "training_samples_by_class", "testing_samples_by_class", "confusion_matrix", "producers_accuracy", "users_accuracy", "feature_importance"):
+                if isinstance(props.get(key), str):
+                    props[key] = json.loads(props[key])
+            records.append(props)
+        return {"year": year, "records": records, "error": None}
+    except (OSError, ValueError, KeyError, TypeError):
+        logging.exception("Could not load classification statistics for %s", year)
+        return {"year": year, "records": [], "error": "Statistics could not be loaded."}
 
 
 # ============================================================
@@ -23,34 +46,15 @@ LANDSAT_COLLECTION = (
 )
 
 
+CLASSIFIER_YEARS = (2000, 2005, 2010, 2015, 2020, 2023)
 CLASSIFIER_PERIODS = [
     {
-        "start_year": 2015,
-        "end_year": 2019,
-        "classifier_year": 2015,
-        "asset": (
-            "projects/etmodule/assets/classifiers/"
-            "RF_Classifier_2015"
-        ),
-    },
-    {
-        "start_year": 2020,
-        "end_year": 2022,
-        "classifier_year": 2020,
-        "asset": (
-            "projects/etmodule/assets/classifiers/"
-            "RF_Classifier_2020"
-        ),
-    },
-    {
-        "start_year": 2023,
-        "end_year": 2023,
-        "classifier_year": 2023,
-        "asset": (
-            "projects/etmodule/assets/classifiers/"
-            "RF_Classifier_2023"
-        ),
-    },
+        "start_year": 2000 if i == 0 else (CLASSIFIER_YEARS[i - 1] + year) // 2 + 1,
+        "end_year": 2023 if i == len(CLASSIFIER_YEARS) - 1 else (year + CLASSIFIER_YEARS[i + 1]) // 2,
+        "classifier_year": year,
+        "asset": f"projects/etmodule/assets/classifiers/RF_Classifier_{year}",
+    }
+    for i, year in enumerate(CLASSIFIER_YEARS)
 ]
 
 
@@ -59,10 +63,10 @@ SEARCH_WINDOW_DAYS = 90
 
 CLOUD_COVER_THRESHOLD = 60
 
-SCENES_BEFORE = 2
-SCENES_AFTER = 2
+SCENES_BEFORE = 3
+SCENES_AFTER = 3
 
-PREFERRED_SCENE_COUNT = 4
+PREFERRED_SCENE_COUNT = 6
 MINIMUM_SCENE_COUNT = 3
 
 
@@ -220,6 +224,24 @@ def _get_classification_map_sync(
         classifier_asset
     )
 
+
+    try:
+        matrix = classifier.confusionMatrix()
+        accuracy_metrics = {
+            "source": "training",
+            "confusionMatrix": matrix.array().getInfo(),
+            "overallAccuracy": matrix.accuracy().getInfo(),
+            "kappa": matrix.kappa().getInfo(),
+            "producersAccuracy": matrix.producersAccuracy().getInfo(),
+            "consumersAccuracy": matrix.consumersAccuracy().getInfo(),
+        }
+    except Exception:
+        accuracy_metrics = None
+
+    try:
+        feature_importance = classifier.explain().get("importance").getInfo()
+    except Exception:
+        feature_importance = None
 
     # --------------------------------------------------------
     # 3. LOAD MINE ROIs
@@ -397,6 +419,7 @@ def _get_classification_map_sync(
         ),
 
         "scope": scope,
+        "statistics": _load_classification_stats(classifier_year, mine_id),
 
         "classifier": {
     "modelYear": classifier_year,
@@ -407,6 +430,8 @@ def _get_classification_map_sync(
         classifier_config["end_year"]
     ),
     "asset": classifier_asset,
+    "accuracy": accuracy_metrics,
+    "featureImportance": feature_importance,
 },
 
         "imagery": {

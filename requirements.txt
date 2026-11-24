@@ -47,3 +47,9 @@ typing_extensions
 uritemplate
 urllib3
 uvicorn
+shapely
+pyproj
+numpy
+scipy
+libpysal
+esda

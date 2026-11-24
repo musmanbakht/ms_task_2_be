@@ -1,5 +1,5 @@
 from datetime import date
-from typing import Optional, List
+from typing import Optional, List, Any
 
 from pydantic import BaseModel
 
@@ -33,6 +33,8 @@ class ClassificationClassifierInfo(BaseModel):
     periodStartYear: int
     periodEndYear: int
     asset: str
+    accuracy: Optional[dict[str, Any]] = None
+    featureImportance: Optional[dict[str, Any]] = None
 
 
 class ClassificationImageryInfo(BaseModel):
@@ -48,6 +50,7 @@ class ClassificationMapResponse(BaseModel):
     status: int
     requestedDate: str
     scope: str
+    statistics: dict[str, Any]
 
     classifier: ClassificationClassifierInfo
     imagery: ClassificationImageryInfo

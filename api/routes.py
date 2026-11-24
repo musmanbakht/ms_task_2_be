@@ -116,3 +116,21 @@ async def get_supervised_classification_map(
             mine_id=request.mine_id,
         )
     )
+@router.get("/api/mining/hotspot-analysis")
+async def mining_hotspot_analysis(session_id: str = Query(None, description="Optional existing Earth Engine session ID")):
+    """Return mining-change records and precomputed Gi* results."""
+    import asyncio
+    from services.hotspot_service import get_analysis
+    return await asyncio.to_thread(get_analysis, session_id)
+
+@router.get('/api/mining/change-detection')
+async def change_detection(start_year: int, end_year: int, session_id: str = Query(...)):
+    import asyncio
+    from services.change_detection_service import get_change
+    return await asyncio.to_thread(get_change, session_id, start_year, end_year)
+
+@router.get('/api/mining/saved-classification')
+async def saved_classification(year: int, session_id: str = Query(...)):
+    import asyncio
+    from services.saved_classification_service import get_saved_classification
+    return await asyncio.to_thread(get_saved_classification, year, session_id)

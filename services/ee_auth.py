@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import ee
 import uuid
+import secrets
 from typing import Dict, Optional
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Response
@@ -43,10 +44,13 @@ async def initialize_auth():
         print("in func")
         session_id = str(uuid.uuid4())
 
+        code_verifier = secrets.token_urlsafe(64)
         flow = Flow.from_client_config(
             CLIENT_CONFIG,
             scopes=SCOPES,
-            redirect_uri=REDIRECT_URI
+            redirect_uri=REDIRECT_URI,
+            code_verifier=code_verifier,
+            autogenerate_code_verifier=False,
         )
 
         auth_url, state = flow.authorization_url(
@@ -58,6 +62,7 @@ async def initialize_auth():
         # Store state for verification in callback
         pending_auth[session_id] = {
             "state": state,
+            "code_verifier": code_verifier,
             "created_at": datetime.now(),
             "status": "pending"
         }
@@ -98,7 +103,9 @@ async def auth_callback(code: str, state: str, error: Optional[str] = None):
             CLIENT_CONFIG,
             scopes=SCOPES,
             redirect_uri=REDIRECT_URI,
-            state=state  # Add state here
+            state=state,
+            code_verifier=pending_auth[session_id]["code_verifier"],
+            autogenerate_code_verifier=False,
         )
 
         # Exchange code for tokens
@@ -120,6 +127,7 @@ async def auth_callback(code: str, state: str, error: Optional[str] = None):
             "created_at": datetime.now()
         }
 
+        pending_auth[session_id].pop("code_verifier", None)
         pending_auth[session_id]["status"] = "completed"
 
         # Redirect to frontend with success
@@ -184,7 +192,6 @@ async def check_auth_status(session_id: str):
     """
     Check if a session is authenticated
     """
-    print("user cre", user_credentials)
     if session_id in user_credentials:
         return {"authenticated": True}
     elif session_id in pending_auth:
@@ -244,8 +251,7 @@ async def check_auth_status(session_id: str):
 #     """
 #     Check if a session is authenticated
 #     """
-#     print("user cre", user_credentials)
-#     if session_id in user_credentials:
+# #     if session_id in user_credentials:
 #         return {"authenticated": True}
 #     elif session_id in pending_auth:
 #         return {"authenticated": False, "status": pending_auth[session_id]["status"]}
